@@ -1,0 +1,212 @@
+{
+  "regions": [
+    {
+      "code": "us",
+      "name": "United States",
+      "name_cn": "美国",
+      "currency": "USD",
+      "store_front": "143441",
+      "locale": "en_US"
+    },
+    {
+      "code": "in",
+      "name": "India",
+      "name_cn": "印度",
+      "currency": "INR",
+      "store_front": "143467",
+      "locale": "en_IN"
+    },
+    {
+      "code": "tr",
+      "name": "Turkey",
+      "name_cn": "土耳其",
+      "currency": "TRY",
+      "store_front": "143480",
+      "locale": "tr_TR"
+    },
+    {
+      "code": "ar",
+      "name": "Argentina",
+      "name_cn": "阿根廷",
+      "currency": "ARS",
+      "store_front": "143505",
+      "locale": "es_AR"
+    },
+    {
+      "code": "br",
+      "name": "Brazil",
+      "name_cn": "巴西",
+      "currency": "BRL",
+      "store_front": "143503",
+      "locale": "pt_BR"
+    },
+    {
+      "code": "de",
+      "name": "Germany",
+      "name_cn": "德国",
+      "currency": "EUR",
+      "store_front": "143443",
+      "locale": "de_DE"
+    },
+    {
+      "code": "fr",
+      "name": "France",
+      "name_cn": "法国",
+      "currency": "EUR",
+      "store_front": "143442",
+      "locale": "fr_FR"
+    },
+    {
+      "code": "es",
+      "name": "Spain",
+      "name_cn": "西班牙",
+      "currency": "EUR",
+      "store_front": "143454",
+      "locale": "es_ES"
+    },
+    {
+      "code": "it",
+      "name": "Italy",
+      "name_cn": "意大利",
+      "currency": "EUR",
+      "store_front": "143450",
+      "locale": "it_IT"
+    },
+    {
+      "code": "gb",
+      "name": "United Kingdom",
+      "name_cn": "英国",
+      "currency": "GBP",
+      "store_front": "143444",
+      "locale": "en_GB"
+    },
+    {
+      "code": "jp",
+      "name": "Japan",
+      "name_cn": "日本",
+      "currency": "JPY",
+      "store_front": "143462",
+      "locale": "ja_JP"
+    },
+    {
+      "code": "ca",
+      "name": "Canada",
+      "name_cn": "加拿大",
+      "currency": "CAD",
+      "store_front": "143455",
+      "locale": "en_CA"
+    },
+    {
+      "code": "au",
+      "name": "Australia",
+      "name_cn": "澳大利亚",
+      "currency": "AUD",
+      "store_front": "143460",
+      "locale": "en_AU"
+    },
+    {
+      "code": "cn",
+      "name": "China",
+      "name_cn": "中国",
+      "currency": "CNY",
+      "store_front": "143465",
+      "locale": "zh_CN"
+    },
+    {
+      "code": "hk",
+      "name": "Hong Kong",
+      "name_cn": "香港",
+      "currency": "HKD",
+      "store_front": "143463",
+      "locale": "zh_HK"
+    },
+    {
+      "code": "tw",
+      "name": "Taiwan",
+      "name_cn": "台湾",
+      "currency": "TWD",
+      "store_front": "143470",
+      "locale": "zh_TW"
+    },
+    {
+      "code": "sg",
+      "name": "Singapore",
+      "name_cn": "新加坡",
+      "currency": "SGD",
+      "store_front": "143464",
+      "locale": "en_SG"
+    },
+    {
+      "code": "kr",
+      "name": "South Korea",
+      "name_cn": "韩国",
+      "currency": "KRW",
+      "store_front": "143466",
+      "locale": "ko_KR"
+    },
+    {
+      "code": "mx",
+      "name": "Mexico",
+      "name_cn": "墨西哥",
+      "currency": "MXN",
+      "store_front": "143468",
+      "locale": "es_MX"
+    },
+    {
+      "code": "ru",
+      "name": "Russia",
+      "name_cn": "俄罗斯",
+      "currency": "RUB",
+      "store_front": "143469",
+      "locale": "ru_RU"
+    },
+    {
+      "code": "za",
+      "name": "South Africa",
+      "name_cn": "南非",
+      "currency": "ZAR",
+      "store_front": "143472",
+      "locale": "en_ZA"
+    },
+    {
+      "code": "th",
+      "name": "Thailand",
+      "name_cn": "泰国",
+      "currency": "THB",
+      "store_front": "143475",
+      "locale": "th_TH"
+    },
+    {
+      "code": "id",
+      "name": "Indonesia",
+      "name_cn": "印度尼西亚",
+      "currency": "IDR",
+      "store_front": "143476",
+      "locale": "id_ID"
+    },
+    {
+      "code": "my",
+      "name": "Malaysia",
+      "name_cn": "马来西亚",
+      "currency": "MYR",
+      "store_front": "143473",
+      "locale": "en_MY"
+    },
+    {
+      "code": "ph",
+      "name": "Philippines",
+      "name_cn": "菲律宾",
+      "currency": "PHP",
+      "store_front": "143474",
+      "locale": "en_PH"
+    },
+    {
+      "code": "vn",
+      "name": "Vietnam",
+      "name_cn": "越南",
+      "currency": "VND",
+      "store_front": "143471",
+      "locale": "vi_VN"
+    }
+  ]
+}
