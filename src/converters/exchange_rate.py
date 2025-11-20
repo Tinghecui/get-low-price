@@ -108,6 +108,40 @@ class ExchangeRateProvider:
         except Exception as e:
             logger.error(f"保存汇率到数据库失败: {e}")
 
+    def _get_default_rates(self) -> Dict[str, float]:
+        """
+        获取默认汇率（大约汇率，仅用于备用）
+
+        Returns:
+            默认汇率字典
+        """
+        # 这些是大约的汇率，仅在无法获取实时汇率时使用
+        return {
+            "USD": 1.0,
+            "EUR": 0.92,
+            "GBP": 0.79,
+            "JPY": 149.0,
+            "CNY": 7.24,
+            "INR": 83.0,
+            "TRY": 33.5,
+            "ARS": 1000.0,
+            "BRL": 4.97,
+            "CAD": 1.39,
+            "AUD": 1.53,
+            "HKD": 7.83,
+            "TWD": 31.5,
+            "SGD": 1.34,
+            "KRW": 1315.0,
+            "MXN": 17.0,
+            "RUB": 92.0,
+            "ZAR": 18.5,
+            "THB": 34.8,
+            "IDR": 15650.0,
+            "MYR": 4.65,
+            "PHP": 56.0,
+            "VND": 24500.0
+        }
+
     def get_rates(self, force_refresh: bool = False) -> Dict[str, float]:
         """
         获取汇率（优先使用缓存，然后是数据库，最后是 API）
@@ -155,8 +189,12 @@ class ExchangeRateProvider:
                 self._last_fetch_time = datetime.utcnow()
                 return self._rates_cache
             else:
-                logger.error("无法获取汇率数据")
-                raise
+                # 如果数据库也没有数据，返回一个包含常见货币的默认汇率
+                logger.warning(f"无法从 API 或数据库获取汇率，使用默认汇率: {e}")
+                default_rates = self._get_default_rates()
+                self._rates_cache = default_rates
+                self._last_fetch_time = datetime.utcnow()
+                return self._rates_cache
 
     def get_rate(self, from_currency: str, to_currency: str = "USD",
                  force_refresh: bool = False) -> Optional[float]:
