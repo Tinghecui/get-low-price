@@ -41,13 +41,14 @@ class CurrencyConverter:
         """初始化货币转换器"""
         self.exchange_rate_provider = exchange_rate_provider
 
-    def parse_price_string(self, price_str: str, currency_code: str = None) -> Optional[float]:
+    def parse_price_string(self, price_str: str, currency_code: str = None, silent: bool = False) -> Optional[float]:
         """
         解析价格字符串，提取数值
 
         Args:
             price_str: 价格字符串，如 "$19.99", "€15,99", "¥2,000"
             currency_code: 货币代码（可选，用于处理不同货币的格式差异）
+            silent: 是否静默模式（不输出警告日志）
 
         Returns:
             价格数值，如果解析失败返回 None
@@ -70,7 +71,8 @@ class CurrencyConverter:
 
             # 验证字符串中是否包含数字
             if not re.search(r'\d', cleaned):
-                logger.debug(f"价格字符串不包含数字: {price_str}")
+                if not silent:
+                    logger.debug(f"价格字符串不包含数字: {price_str}")
                 return None
 
             # 移除常见的货币符号
@@ -102,7 +104,8 @@ class CurrencyConverter:
 
             # 再次验证是否还有数字
             if not re.search(r'\d', cleaned):
-                logger.debug(f"清理后不包含数字: {price_str}")
+                if not silent:
+                    logger.debug(f"清理后不包含数字: {price_str}")
                 return None
 
             # 提取数字和分隔符
@@ -111,7 +114,8 @@ class CurrencyConverter:
 
             # 如果清理后为空或只有标点，返回 None
             if not cleaned or cleaned in ['.', ',', '.,', ',.']:
-                logger.debug(f"清理后只剩标点符号: {price_str}")
+                if not silent:
+                    logger.debug(f"清理后只剩标点符号: {price_str}")
                 return None
 
             # 判断小数分隔符
@@ -144,13 +148,15 @@ class CurrencyConverter:
 
             # 验证价格是否合理（大于0，小于1000000）
             if price <= 0 or price > 1000000:
-                logger.debug(f"价格超出合理范围: {price} (原始: {price_str})")
+                if not silent:
+                    logger.debug(f"价格超出合理范围: {price} (原始: {price_str})")
                 return None
 
             return price
 
         except (ValueError, AttributeError) as e:
-            logger.warning(f"解析价格字符串失败: {price_str}, 错误: {e}")
+            if not silent:
+                logger.warning(f"解析价格字符串失败: {price_str}, 错误: {e}")
             return None
 
     def detect_currency_from_symbol(self, price_str: str) -> Optional[str]:
