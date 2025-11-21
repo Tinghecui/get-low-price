@@ -109,12 +109,15 @@ class AppStoreScraper:
                 logger.info(f"尝试查找 In-App Purchases 部分...")
 
                 # 尝试多种可能的标题文本（不同语言）
+                # 注意：某些语言版本使用特殊的连字符（如 U+2011 non-breaking hyphen）
                 iap_heading_texts = [
                     'In-App Purchases',
+                    'In‑App Purchases',  # 使用 non-breaking hyphen (U+2011)
                     'App 内购买项目',  # 中文
                     'Compras no app',  # 葡萄牙语
                     'Achats intégrés',  # 法语
                     'In-App-Käufe',  # 德语
+                    'In‑App‑Käufe',  # 德语（特殊连字符）
                     'Compras dentro de la app',  # 西班牙语
                     'Compras en la app',  # 西班牙语（替代）
                     'Acquisti in-app',  # 意大利语
@@ -123,76 +126,173 @@ class AppStoreScraper:
                 ]
 
                 iap_section_found = False
-                for heading_text in iap_heading_texts:
-                    try:
-                        # 查找包含标题文本的元素（使用更宽松的匹配）
-                        heading = await page.query_selector(f'h2:has-text("{heading_text}"), h3:has-text("{heading_text}"), [class*="heading"]:has-text("{heading_text}")')
-                        if heading:
-                            logger.info(f"找到 In-App Purchases 标题: {heading_text}")
-                            # 滚动到该元素
-                            await heading.scroll_into_view_if_needed()
-                            await asyncio.sleep(1.5)  # 等待滚动动画完成
-                            iap_section_found = True
-                            break
-                    except Exception as e:
-                        continue
+                iap_heading = None
 
-                # 如果没有找到标题，尝试多次滚动页面（逐步向下）
+                # 首先尝试使用正则表达式进行更灵活的匹配
+                try:
+                    # 使用正则表达式匹配 "In" + 任意字符 + "App" + 任意字符 + "Purchase"
+                    iap_heading = await page.query_selector('text=/In.?App.?Purchase/i')
+                    if iap_heading:
+                        text = await iap_heading.inner_text()
+                        logger.info(f"找到 In-App Purchases 标题（正则匹配）: {text}")
+                        await iap_heading.scroll_into_view_if_needed()
+                        await asyncio.sleep(2)  # 等待滚动和内容加载
+                        iap_section_found = True
+                except Exception as e:
+                    logger.debug(f"正则匹配失败: {e}")
+
+                # 如果正则匹配失败，尝试精确文本匹配
                 if not iap_section_found:
-                    logger.info("未找到 In-App Purchases 标题，尝试滚动页面...")
-                    # 分多次滚动，每次滚动一部分，增加找到IAP部分的机会
-                    for scroll_position in [0.3, 0.5, 0.7]:
-                        await page.evaluate(f'window.scrollTo(0, document.body.scrollHeight * {scroll_position})')
-                        await asyncio.sleep(1)
-                        # 尝试查找价格元素
-                        test_elements = await page.query_selector_all('li, dd, div[class*="lockup"]')
-                        if len(test_elements) > 10:  # 如果找到足够多的元素，可能已经到了IAP部分
-                            break
+                    for heading_text in iap_heading_texts:
+                        try:
+                            # 查找包含标题文本的元素（使用更宽松的匹配）
+                            heading = await page.query_selector(f'h2:has-text("{heading_text}"), h3:has-text("{heading_text}"), [class*="heading"]:has-text("{heading_text}")')
+                            if heading:
+                                logger.info(f"找到 In-App Purchases 标题: {heading_text}")
+                                # 滚动到该元素
+                                await heading.scroll_into_view_if_needed()
+                                await asyncio.sleep(2)  # 等待滚动动画完成
+                                iap_section_found = True
+                                iap_heading = heading
+                                break
+                        except Exception as e:
+                            continue
+
+                # 如果没有找到标题，尝试滚动到页面中部（IAP 通常在页面中部）
+                if not iap_section_found:
+                    logger.info("未找到 In-App Purchases 标题，尝试滚动到页面中部...")
+                    await page.evaluate('window.scrollTo(0, document.body.scrollHeight * 0.5)')
+                    await asyncio.sleep(2)
+
+                    # 再次尝试查找标题
+                    try:
+                        iap_heading = await page.query_selector('text=/In.?App.?Purchase/i')
+                        if iap_heading:
+                            text = await iap_heading.inner_text()
+                            logger.info(f"滚动后找到标题: {text}")
+                            await iap_heading.scroll_into_view_if_needed()
+                            await asyncio.sleep(2)
+                            iap_section_found = True
+                    except:
+                        pass
 
                 # 等待价格元素加载
                 await asyncio.sleep(1)
 
                 # 提取 In-App Purchases 部分的价格
-                # 方法 1a: 查找包含价格的列表项或行
-                try:
-                    # App Store 的 In-App Purchases 通常在一个列表中
-                    # 每个项目包含名称和价格
-                    price_containers = [
-                        'li',  # 列表项
-                        '[class*="in-app-purchase"]',
-                        '[class*="iap"]',
-                        'dd',  # 定义列表
-                        'div[class*="lockup"]',  # App Store 使用的布局类
-                    ]
+                # 方法 1a: 如果找到了 IAP 标题，从其后面的内容中提取价格
+                if iap_section_found and iap_heading:
+                    try:
+                        # 获取标题后面的所有兄弟元素（通常 IAP 列表在标题下方）
+                        iap_section = await iap_heading.evaluate_handle('''
+                            el => {
+                                // 获取标题的父容器
+                                let parent = el.parentElement;
+                                // 尝试向上找2层，找到包含 IAP 列表的容器
+                                for (let i = 0; i < 2; i++) {
+                                    if (parent && parent.parentElement) {
+                                        parent = parent.parentElement;
+                                    }
+                                }
+                                return parent;
+                            }
+                        ''')
 
-                    for container_selector in price_containers:
-                        try:
-                            containers = await page.query_selector_all(container_selector)
-                            for container in containers:
-                                text = await container.inner_text()
+                        # 提取该区域的所有文本
+                        iap_text = await iap_section.inner_text()
+                        logger.debug(f"IAP 部分文本（前200字符）: {iap_text[:200]}")
 
-                                # 检查是否包含 Claude 相关关键词（确保是订阅项）
-                                if any(keyword in text for keyword in ['Claude', 'Pro', 'Max', 'Team', 'Monthly', 'Annual', 'month', 'year']):
-                                    # 检查是否包含价格
-                                    if re.search(r'[\d.,]+', text):
+                        # 在 IAP 区域中查找所有价格元素
+                        # 查找包含 "$" 或数字+小数点的元素
+                        price_elements = await iap_section.query_selector_all('*')
+                        for element in price_elements:
+                            try:
+                                text = await element.inner_text()
+                                # 文本不能太长（避免匹配到大容器）
+                                if len(text) > 200:
+                                    continue
+
+                                # 检查是否包含 Claude 订阅相关关键词
+                                keywords = ['Claude', 'Pro', 'Max', 'Team', 'Monthly', 'Annual',
+                                           'month', 'year', 'Subscription', '订阅']
+                                if any(keyword.lower() in text.lower() for keyword in keywords):
+                                    # 检查是否包含价格符号
+                                    if '$' in text or '¥' in text or '€' in text or '£' in text:
                                         # 过滤掉无效文本
-                                        if any(invalid in text.upper() for invalid in ['PDF', 'DOWNLOAD', 'GET', 'OPEN', 'RATING']):
+                                        invalid_keywords = ['PDF', 'DOWNLOAD', 'GET', 'OPEN',
+                                                           'RATING', 'REVIEW', 'MORE', 'AGE']
+                                        if any(invalid in text.upper() for invalid in invalid_keywords):
                                             continue
 
                                         # 解析价格
-                                        price_local = currency_converter.parse_price_string(text, region.currency, silent=True)
+                                        price_local = currency_converter.parse_price_string(
+                                            text, region.currency, silent=True
+                                        )
                                         if price_local and price_local > 0:
                                             all_prices.append({
                                                 'text': text.replace('\n', ' ').strip(),
                                                 'price': price_local,
-                                                'source': f'iap_container: {container_selector}'
+                                                'source': 'iap_section_direct'
                                             })
-                                            logger.debug(f"找到 IAP 价格: {price_local} ({text[:50]}...)")
-                        except Exception as e:
-                            continue
+                                            logger.info(f"从 IAP 区域找到价格: {price_local} {region.currency} - {text[:60]}")
+                            except:
+                                continue
 
-                except Exception as e:
-                    logger.debug(f"方法 1a 提取 IAP 价格失败: {e}")
+                    except Exception as e:
+                        logger.debug(f"从 IAP 区域提取价格失败: {e}")
+
+                # 方法 1b: 如果上面的方法没找到，尝试查找标准的价格容器
+                if not all_prices:
+                    try:
+                        # App Store 的 In-App Purchases 通常在一个列表中
+                        # 每个项目包含名称和价格
+                        price_containers = [
+                            'li',  # 列表项
+                            '[class*="in-app-purchase"]',
+                            '[class*="iap"]',
+                            'dd',  # 定义列表
+                            'div[class*="lockup"]',  # App Store 使用的布局类
+                            'div[class*="subscription"]',  # 订阅相关
+                        ]
+
+                        for container_selector in price_containers:
+                            try:
+                                containers = await page.query_selector_all(container_selector)
+                                for container in containers:
+                                    text = await container.inner_text()
+
+                                    # 文本不能太长
+                                    if len(text) > 200:
+                                        continue
+
+                                    # 检查是否包含 Claude 相关关键词（确保是订阅项）
+                                    if any(keyword.lower() in text.lower()
+                                          for keyword in ['Claude', 'Pro', 'Max', 'Team',
+                                                         'Monthly', 'Annual', 'month', 'year']):
+                                        # 检查是否包含价格
+                                        if re.search(r'[\d.,]+', text):
+                                            # 过滤掉无效文本
+                                            if any(invalid in text.upper()
+                                                  for invalid in ['PDF', 'DOWNLOAD', 'GET',
+                                                                 'OPEN', 'RATING']):
+                                                continue
+
+                                            # 解析价格
+                                            price_local = currency_converter.parse_price_string(
+                                                text, region.currency, silent=True
+                                            )
+                                            if price_local and price_local > 0:
+                                                all_prices.append({
+                                                    'text': text.replace('\n', ' ').strip(),
+                                                    'price': price_local,
+                                                    'source': f'iap_container: {container_selector}'
+                                                })
+                                                logger.debug(f"找到 IAP 价格: {price_local} ({text[:50]}...)")
+                            except Exception as e:
+                                continue
+
+                    except Exception as e:
+                        logger.debug(f"方法 1b 提取 IAP 价格失败: {e}")
 
             except Exception as e:
                 logger.debug(f"滚动到 In-App Purchases 失败: {e}")
