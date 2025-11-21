@@ -116,6 +116,7 @@ class AppStoreScraper:
                     'Achats intégrés',  # 法语
                     'In-App-Käufe',  # 德语
                     'Compras dentro de la app',  # 西班牙语
+                    'Compras en la app',  # 西班牙语（替代）
                     'Acquisti in-app',  # 意大利语
                     'App 내 구입',  # 韩语
                     'アプリ内課金',  # 日语
@@ -124,23 +125,29 @@ class AppStoreScraper:
                 iap_section_found = False
                 for heading_text in iap_heading_texts:
                     try:
-                        # 查找包含标题文本的元素
+                        # 查找包含标题文本的元素（使用更宽松的匹配）
                         heading = await page.query_selector(f'h2:has-text("{heading_text}"), h3:has-text("{heading_text}"), [class*="heading"]:has-text("{heading_text}")')
                         if heading:
                             logger.info(f"找到 In-App Purchases 标题: {heading_text}")
                             # 滚动到该元素
                             await heading.scroll_into_view_if_needed()
-                            await asyncio.sleep(1)  # 等待滚动动画完成
+                            await asyncio.sleep(1.5)  # 等待滚动动画完成
                             iap_section_found = True
                             break
                     except Exception as e:
                         continue
 
-                # 如果没有找到标题，尝试滚动到页面中部（In-App Purchases 通常在中部）
+                # 如果没有找到标题，尝试多次滚动页面（逐步向下）
                 if not iap_section_found:
                     logger.info("未找到 In-App Purchases 标题，尝试滚动页面...")
-                    await page.evaluate('window.scrollTo(0, document.body.scrollHeight / 2)')
-                    await asyncio.sleep(2)
+                    # 分多次滚动，每次滚动一部分，增加找到IAP部分的机会
+                    for scroll_position in [0.3, 0.5, 0.7]:
+                        await page.evaluate(f'window.scrollTo(0, document.body.scrollHeight * {scroll_position})')
+                        await asyncio.sleep(1)
+                        # 尝试查找价格元素
+                        test_elements = await page.query_selector_all('li, dd, div[class*="lockup"]')
+                        if len(test_elements) > 10:  # 如果找到足够多的元素，可能已经到了IAP部分
+                            break
 
                 # 等待价格元素加载
                 await asyncio.sleep(1)
@@ -173,7 +180,7 @@ class AppStoreScraper:
                                             continue
 
                                         # 解析价格
-                                        price_local = currency_converter.parse_price_string(text, region.currency)
+                                        price_local = currency_converter.parse_price_string(text, region.currency, silent=True)
                                         if price_local and price_local > 0:
                                             all_prices.append({
                                                 'text': text.replace('\n', ' ').strip(),
@@ -190,15 +197,31 @@ class AppStoreScraper:
             except Exception as e:
                 logger.debug(f"滚动到 In-App Purchases 失败: {e}")
 
-            # 方法 2: 使用正则表达式在页面内容中搜索价格模式
+            # 方法 2: 使用正则表达式在页面内容中搜索价格模式（排除评论和版本历史区域）
             if not all_prices:
                 try:
                     logger.info("方法 1 未找到价格，尝试在页面内容中搜索...")
                     page_content = await page.content()
 
-                    # 移除 HTML 标签，保留文本内容
+                    # 移除评论区域和版本历史区域（这些区域经常包含误匹配的数字）
                     import html
-                    text_content = re.sub(r'<[^>]+>', ' ', page_content)
+                    from bs4 import BeautifulSoup
+
+                    soup = BeautifulSoup(page_content, 'html.parser')
+
+                    # 移除已知的非价格区域
+                    for selector in [
+                        '[class*="review"]',  # 评论区
+                        '[class*="rating"]',  # 评分区
+                        '[class*="version"]',  # 版本历史
+                        '[class*="whats-new"]',  # 更新说明
+                        '[class*="description"]',  # 描述区
+                    ]:
+                        for element in soup.select(selector):
+                            element.decompose()
+
+                    # 提取剩余的文本内容
+                    text_content = soup.get_text(separator=' ')
                     text_content = html.unescape(text_content)
 
                     # 查找价格模式（货币符号 + 数字）
@@ -212,7 +235,7 @@ class AppStoreScraper:
                         matches = re.findall(pattern, text_content)
                         for match in matches:
                             # 过滤掉无效的价格（太大或太小）
-                            price_local = currency_converter.parse_price_string(match, region.currency)
+                            price_local = currency_converter.parse_price_string(match, region.currency, silent=True)
                             if price_local and 10 <= price_local <= 100000:  # 合理的价格范围
                                 all_prices.append({
                                     'text': match,
@@ -249,27 +272,48 @@ class AppStoreScraper:
                 )
 
                 if price_usd:
-                    # 获取汇率
-                    exchange_rate = exchange_rate_provider.get_rate(
-                        region.currency,
-                        "USD"
-                    )
+                    # 验证价格合理性（Claude订阅价格应该在10-500美元之间）
+                    if price_usd < 10:
+                        logger.warning(f"价格过低: {price_usd} USD，可能提取错误，继续尝试其他价格")
+                        # 尝试使用次高的价格
+                        if len(all_prices) > 1:
+                            sorted_prices = sorted(all_prices, key=lambda x: x['price'], reverse=True)
+                            for price_info in sorted_prices[1:]:
+                                alt_price_local = price_info['price']
+                                alt_price_usd = currency_converter.convert(alt_price_local, region.currency, "USD")
+                                if alt_price_usd and 10 <= alt_price_usd <= 500:
+                                    logger.info(f"使用次高价格: {alt_price_local} {region.currency} = ${alt_price_usd:.2f} USD")
+                                    price_local = alt_price_local
+                                    price_usd = alt_price_usd
+                                    max_price_info = price_info
+                                    break
 
-                    return {
-                        "app_id": self.app_id,
-                        "app_name": "Claude",
-                        "region_code": region.code,
-                        "region_name": region.name,
-                        "region_name_cn": region.name_cn,
-                        "currency": region.currency,
-                        "price_local": price_local,
-                        "price_usd": price_usd,
-                        "exchange_rate": exchange_rate or 1.0,
-                        "subscription_type": "max",  # 标记为最高价格
-                        "scrape_time": datetime.utcnow(),
-                        "success": 1,
-                        "error_message": None
-                    }
+                    # 再次检查价格是否合理
+                    if price_usd >= 10 and price_usd <= 500:
+                        # 获取汇率
+                        exchange_rate = exchange_rate_provider.get_rate(
+                            region.currency,
+                            "USD"
+                        )
+
+                        return {
+                            "app_id": self.app_id,
+                            "app_name": "Claude",
+                            "region_code": region.code,
+                            "region_name": region.name,
+                            "region_name_cn": region.name_cn,
+                            "currency": region.currency,
+                            "price_local": price_local,
+                            "price_usd": price_usd,
+                            "exchange_rate": exchange_rate or 1.0,
+                            "subscription_type": "max",  # 标记为最高价格
+                            "scrape_time": datetime.utcnow(),
+                            "success": 1,
+                            "error_message": None
+                        }
+                    else:
+                        logger.warning(f"价格不在合理范围内: {price_usd} USD")
+                        # 继续执行，保存截图等后续操作
 
             # 方法 3: 截图保存以便调试
             try:
