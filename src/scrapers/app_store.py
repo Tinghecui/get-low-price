@@ -104,72 +104,120 @@ class AppStoreScraper:
             # 用于存储所有找到的价格
             all_prices = []
 
-            # 方法 1: 查找包含订阅信息的按钮元素
+            # 方法 1: 滚动到 "In-App Purchases" 部分并提取价格
             try:
-                # 查找所有包含价格的元素
-                # App Store 的价格通常在 button 或特定的 div 中
-                price_selectors = [
-                    'button[aria-label*="purchase"]',
-                    'button[aria-label*="subscription"]',
-                    'button:has-text("month")',
-                    'button:has-text("year")',
-                    '[class*="in-app-purchase"] button',
-                    '[class*="iap"] button',
-                    'li:has-text("Claude") button',
-                    'li:has-text("Pro") button',
-                    'li:has-text("Team") button',
-                    'button[type="button"]',
+                logger.info(f"尝试查找 In-App Purchases 部分...")
+
+                # 尝试多种可能的标题文本（不同语言）
+                iap_heading_texts = [
+                    'In-App Purchases',
+                    'App 内购买项目',  # 中文
+                    'Compras no app',  # 葡萄牙语
+                    'Achats intégrés',  # 法语
+                    'In-App-Käufe',  # 德语
+                    'Compras dentro de la app',  # 西班牙语
+                    'Acquisti in-app',  # 意大利语
+                    'App 내 구입',  # 韩语
+                    'アプリ内課金',  # 日语
                 ]
 
-                for selector in price_selectors:
+                iap_section_found = False
+                for heading_text in iap_heading_texts:
                     try:
-                        elements = await page.query_selector_all(selector)
-                        for element in elements:
-                            text = await element.inner_text()
-                            # 检查是否包含价格信息和订阅关键词
-                            if re.search(r'[\d.,]+', text) and ('month' in text.lower() or 'year' in text.lower()):
-                                # 过滤掉无效文本（如 PDF, Download 等）
-                                if any(invalid in text.upper() for invalid in ['PDF', 'DOWNLOAD', 'GET', 'OPEN']):
-                                    continue
-
-                                # 解析价格
-                                price_local = currency_converter.parse_price_string(text, region.currency)
-                                if price_local and price_local > 0:
-                                    all_prices.append({
-                                        'text': text,
-                                        'price': price_local,
-                                        'source': f'selector: {selector}'
-                                    })
-                                    logger.debug(f"找到价格: {price_local} ({text})")
+                        # 查找包含标题文本的元素
+                        heading = await page.query_selector(f'h2:has-text("{heading_text}"), h3:has-text("{heading_text}"), [class*="heading"]:has-text("{heading_text}")')
+                        if heading:
+                            logger.info(f"找到 In-App Purchases 标题: {heading_text}")
+                            # 滚动到该元素
+                            await heading.scroll_into_view_if_needed()
+                            await asyncio.sleep(1)  # 等待滚动动画完成
+                            iap_section_found = True
+                            break
                     except Exception as e:
                         continue
 
-            except Exception as e:
-                logger.debug(f"方法 1 提取价格失败: {e}")
+                # 如果没有找到标题，尝试滚动到页面中部（In-App Purchases 通常在中部）
+                if not iap_section_found:
+                    logger.info("未找到 In-App Purchases 标题，尝试滚动页面...")
+                    await page.evaluate('window.scrollTo(0, document.body.scrollHeight / 2)')
+                    await asyncio.sleep(2)
 
-            # 方法 2: 使用正则表达式在整个页面内容中搜索（作为备选）
+                # 等待价格元素加载
+                await asyncio.sleep(1)
+
+                # 提取 In-App Purchases 部分的价格
+                # 方法 1a: 查找包含价格的列表项或行
+                try:
+                    # App Store 的 In-App Purchases 通常在一个列表中
+                    # 每个项目包含名称和价格
+                    price_containers = [
+                        'li',  # 列表项
+                        '[class*="in-app-purchase"]',
+                        '[class*="iap"]',
+                        'dd',  # 定义列表
+                        'div[class*="lockup"]',  # App Store 使用的布局类
+                    ]
+
+                    for container_selector in price_containers:
+                        try:
+                            containers = await page.query_selector_all(container_selector)
+                            for container in containers:
+                                text = await container.inner_text()
+
+                                # 检查是否包含 Claude 相关关键词（确保是订阅项）
+                                if any(keyword in text for keyword in ['Claude', 'Pro', 'Max', 'Team', 'Monthly', 'Annual', 'month', 'year']):
+                                    # 检查是否包含价格
+                                    if re.search(r'[\d.,]+', text):
+                                        # 过滤掉无效文本
+                                        if any(invalid in text.upper() for invalid in ['PDF', 'DOWNLOAD', 'GET', 'OPEN', 'RATING']):
+                                            continue
+
+                                        # 解析价格
+                                        price_local = currency_converter.parse_price_string(text, region.currency)
+                                        if price_local and price_local > 0:
+                                            all_prices.append({
+                                                'text': text.replace('\n', ' ').strip(),
+                                                'price': price_local,
+                                                'source': f'iap_container: {container_selector}'
+                                            })
+                                            logger.debug(f"找到 IAP 价格: {price_local} ({text[:50]}...)")
+                        except Exception as e:
+                            continue
+
+                except Exception as e:
+                    logger.debug(f"方法 1a 提取 IAP 价格失败: {e}")
+
+            except Exception as e:
+                logger.debug(f"滚动到 In-App Purchases 失败: {e}")
+
+            # 方法 2: 使用正则表达式在页面内容中搜索价格模式
             if not all_prices:
                 try:
+                    logger.info("方法 1 未找到价格，尝试在页面内容中搜索...")
                     page_content = await page.content()
-                    # 根据货币符号和数字模式搜索
+
+                    # 移除 HTML 标签，保留文本内容
+                    import html
+                    text_content = re.sub(r'<[^>]+>', ' ', page_content)
+                    text_content = html.unescape(text_content)
+
+                    # 查找价格模式（货币符号 + 数字）
+                    # 支持多种货币格式
                     currency_patterns = [
-                        r'[\$€£¥₹₺₽₩]\s*[\d.,]+(?:\s*/\s*(?:month|year))?',  # 货币符号开头
-                        r'[\d.,]+\s*[\$€£¥₹₺₽₩](?:\s*/\s*(?:month|year))?',  # 货币符号结尾
+                        r'[\$€£¥₹₺₽₩R\$]\s*[\d.,]+',  # 货币符号在前
+                        r'[\d.,]+\s*[\$€£¥₹₺₽₩R\$]',  # 货币符号在后
                     ]
 
                     for pattern in currency_patterns:
-                        matches = re.findall(pattern, page_content, re.IGNORECASE)
+                        matches = re.findall(pattern, text_content)
                         for match in matches:
-                            # 过滤掉无效文本
-                            if any(invalid in match.upper() for invalid in ['PDF', 'DOWNLOAD', 'GET', 'OPEN']):
-                                continue
-
+                            # 过滤掉无效的价格（太大或太小）
                             price_local = currency_converter.parse_price_string(match, region.currency)
-                            if price_local and price_local > 0:
+                            if price_local and 10 <= price_local <= 100000:  # 合理的价格范围
                                 all_prices.append({
                                     'text': match,
                                     'price': price_local,
-                                    'source': 'page_content'
+                                    'source': 'page_content_regex'
                                 })
                                 logger.debug(f"在页面内容中找到价格: {price_local} ({match})")
 
@@ -178,11 +226,20 @@ class AppStoreScraper:
 
             # 如果找到价格，选择最高的
             if all_prices:
+                # 去重（相同价格只保留一个）
+                unique_prices = {}
+                for price_info in all_prices:
+                    price = price_info['price']
+                    if price not in unique_prices:
+                        unique_prices[price] = price_info
+
+                all_prices = list(unique_prices.values())
+
                 # 按价格排序，取最高的
                 max_price_info = max(all_prices, key=lambda x: x['price'])
                 price_local = max_price_info['price']
 
-                logger.info(f"找到 {len(all_prices)} 个价格，选择最高: {price_local} {region.currency} (来源: {max_price_info['source']})")
+                logger.info(f"找到 {len(all_prices)} 个不同价格，选择最高: {price_local} {region.currency} (来源: {max_price_info['source']})")
 
                 # 转换为美元
                 price_usd = currency_converter.convert(
