@@ -207,6 +207,86 @@
       "currency": "VND",
       "store_front": "143471",
       "locale": "vi_VN"
+    },
+    {
+      "code": "eg",
+      "name": "Egypt",
+      "name_cn": "埃及",
+      "currency": "EGP",
+      "store_front": "143516",
+      "locale": "en_EG"
+    },
+    {
+      "code": "pk",
+      "name": "Pakistan",
+      "name_cn": "巴基斯坦",
+      "currency": "PKR",
+      "store_front": "143477",
+      "locale": "en_PK"
+    },
+    {
+      "code": "ng",
+      "name": "Nigeria",
+      "name_cn": "尼日利亚",
+      "currency": "NGN",
+      "store_front": "143561",
+      "locale": "en_NG"
+    },
+    {
+      "code": "co",
+      "name": "Colombia",
+      "name_cn": "哥伦比亚",
+      "currency": "COP",
+      "store_front": "143501",
+      "locale": "es_CO"
+    },
+    {
+      "code": "cl",
+      "name": "Chile",
+      "name_cn": "智利",
+      "currency": "CLP",
+      "store_front": "143483",
+      "locale": "es_CL"
+    },
+    {
+      "code": "pe",
+      "name": "Peru",
+      "name_cn": "秘鲁",
+      "currency": "PEN",
+      "store_front": "143507",
+      "locale": "es_PE"
+    },
+    {
+      "code": "pl",
+      "name": "Poland",
+      "name_cn": "波兰",
+      "currency": "PLN",
+      "store_front": "143478",
+      "locale": "pl_PL"
+    },
+    {
+      "code": "cz",
+      "name": "Czech Republic",
+      "name_cn": "捷克",
+      "currency": "CZK",
+      "store_front": "143489",
+      "locale": "cs_CZ"
+    },
+    {
+      "code": "ro",
+      "name": "Romania",
+      "name_cn": "罗马尼亚",
+      "currency": "RON",
+      "store_front": "143487",
+      "locale": "ro_RO"
+    },
+    {
+      "code": "ua",
+      "name": "Ukraine",
+      "name_cn": "乌克兰",
+      "currency": "UAH",
+      "store_front": "143492",
+      "locale": "uk_UA"
     }
   ]
 }

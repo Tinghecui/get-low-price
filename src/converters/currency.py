@@ -68,6 +68,11 @@ class CurrencyConverter:
             # 移除货币符号和空格
             cleaned = price_str.strip()
 
+            # 验证字符串中是否包含数字
+            if not re.search(r'\d', cleaned):
+                logger.debug(f"价格字符串不包含数字: {price_str}")
+                return None
+
             # 移除常见的货币符号
             for symbol in self.CURRENCY_SYMBOLS.keys():
                 cleaned = cleaned.replace(symbol, "")
@@ -75,8 +80,14 @@ class CurrencyConverter:
             # 移除货币代码（如 USD, EUR 等）
             cleaned = re.sub(r'[A-Z]{3}', '', cleaned)
 
-            # 移除空格
+            # 移除空格和换行
             cleaned = cleaned.strip()
+            cleaned = cleaned.replace('\n', '').replace('\r', '')
+
+            # 移除常见的非价格文本
+            # 如 "per month", "per year", "/month", "/year" 等
+            cleaned = re.sub(r'/(month|year|mo|yr)', '', cleaned, flags=re.IGNORECASE)
+            cleaned = re.sub(r'per\s+(month|year)', '', cleaned, flags=re.IGNORECASE)
 
             # 处理不同的数字格式
             # 例如: "1,234.56" (英文) 或 "1.234,56" (德语/西班牙语) 或 "1 234,56" (法语)
@@ -88,6 +99,20 @@ class CurrencyConverter:
 
             # 移除所有空格
             cleaned = cleaned.replace(' ', '')
+
+            # 再次验证是否还有数字
+            if not re.search(r'\d', cleaned):
+                logger.debug(f"清理后不包含数字: {price_str}")
+                return None
+
+            # 提取数字和分隔符
+            # 只保留数字、逗号、点
+            cleaned = re.sub(r'[^\d.,]', '', cleaned)
+
+            # 如果清理后为空或只有标点，返回 None
+            if not cleaned or cleaned in ['.', ',', '.,', ',.']:
+                logger.debug(f"清理后只剩标点符号: {price_str}")
+                return None
 
             # 判断小数分隔符
             if comma_count > 0 and dot_count > 0:
@@ -116,6 +141,12 @@ class CurrencyConverter:
 
             # 转换为浮点数
             price = float(cleaned)
+
+            # 验证价格是否合理（大于0，小于1000000）
+            if price <= 0 or price > 1000000:
+                logger.debug(f"价格超出合理范围: {price} (原始: {price_str})")
+                return None
+
             return price
 
         except (ValueError, AttributeError) as e:
