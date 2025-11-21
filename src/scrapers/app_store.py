@@ -117,9 +117,14 @@ class AppStoreScraper:
                     'In-App-Käufe',  # 德语
                     'Compras dentro de la app',  # 西班牙语
                     'Compras en la app',  # 西班牙语（替代）
+                    'Compras in-app',  # 西班牙语（简短版）
+                    'Compras',  # 西班牙语（最简版）
                     'Acquisti in-app',  # 意大利语
                     'App 내 구입',  # 韩语
                     'アプリ内課金',  # 日语
+                    'In-app-aankopen',  # 荷兰语
+                    'Kjøp i appen',  # 挪威语
+                    'Покупки в приложении',  # 俄语
                 ]
 
                 iap_section_found = False
@@ -141,13 +146,18 @@ class AppStoreScraper:
                 if not iap_section_found:
                     logger.info("未找到 In-App Purchases 标题，尝试滚动页面...")
                     # 分多次滚动，每次滚动一部分，增加找到IAP部分的机会
-                    for scroll_position in [0.3, 0.5, 0.7]:
+                    # 增加滚动到页面底部，确保能看到所有内容
+                    for scroll_position in [0.3, 0.5, 0.7, 0.9, 1.0]:
                         await page.evaluate(f'window.scrollTo(0, document.body.scrollHeight * {scroll_position})')
-                        await asyncio.sleep(1)
+                        await asyncio.sleep(1.5)  # 增加等待时间，确保动态内容加载
                         # 尝试查找价格元素
                         test_elements = await page.query_selector_all('li, dd, div[class*="lockup"]')
                         if len(test_elements) > 10:  # 如果找到足够多的元素，可能已经到了IAP部分
-                            break
+                            logger.debug(f"在滚动位置 {scroll_position} 找到 {len(test_elements)} 个元素")
+
+                    # 额外滚动：从底部向上一点，有时IAP在页面底部之前
+                    await page.evaluate('window.scrollTo(0, document.body.scrollHeight - 500)')
+                    await asyncio.sleep(1)
 
                 # 等待价格元素加载
                 await asyncio.sleep(1)
@@ -163,32 +173,53 @@ class AppStoreScraper:
                         '[class*="iap"]',
                         'dd',  # 定义列表
                         'div[class*="lockup"]',  # App Store 使用的布局类
+                        'div[class*="product"]',  # 产品容器
+                        'div[class*="subscription"]',  # 订阅容器
+                        'ul > li',  # 明确的列表项
+                        'ol > li',  # 有序列表项
                     ]
 
                     for container_selector in price_containers:
                         try:
                             containers = await page.query_selector_all(container_selector)
+                            logger.debug(f"找到 {len(containers)} 个 {container_selector} 元素")
+
                             for container in containers:
-                                text = await container.inner_text()
+                                try:
+                                    text = await container.inner_text()
+                                    text_lower = text.lower()
 
-                                # 检查是否包含 Claude 相关关键词（确保是订阅项）
-                                if any(keyword in text for keyword in ['Claude', 'Pro', 'Max', 'Team', 'Monthly', 'Annual', 'month', 'year']):
-                                    # 检查是否包含价格
-                                    if re.search(r'[\d.,]+', text):
-                                        # 过滤掉无效文本
-                                        if any(invalid in text.upper() for invalid in ['PDF', 'DOWNLOAD', 'GET', 'OPEN', 'RATING']):
-                                            continue
+                                    # 检查是否包含 Claude 相关关键词或订阅相关词（确保是订阅项）
+                                    subscription_keywords = [
+                                        'claude', 'pro', 'max', 'team',
+                                        'monthly', 'annual', 'month', 'year',
+                                        'mensual', 'anual', 'mes', 'año',  # 西班牙语
+                                        'mensal', 'ano',  # 葡萄牙语
+                                        'monatlich', 'jährlich',  # 德语
+                                        'mensuel', 'annuel',  # 法语
+                                        'subscription', 'suscripción', 'assinatura', 'abonnement'
+                                    ]
 
-                                        # 解析价格
-                                        price_local = currency_converter.parse_price_string(text, region.currency, silent=True)
-                                        if price_local and price_local > 0:
-                                            all_prices.append({
-                                                'text': text.replace('\n', ' ').strip(),
-                                                'price': price_local,
-                                                'source': f'iap_container: {container_selector}'
-                                            })
-                                            logger.debug(f"找到 IAP 价格: {price_local} ({text[:50]}...)")
+                                    if any(keyword in text_lower for keyword in subscription_keywords):
+                                        # 检查是否包含价格
+                                        if re.search(r'[\d.,]+', text):
+                                            # 过滤掉无效文本
+                                            if any(invalid in text.upper() for invalid in ['PDF', 'DOWNLOAD', 'GET', 'OPEN', 'RATING', 'EDAD']):
+                                                continue
+
+                                            # 解析价格
+                                            price_local = currency_converter.parse_price_string(text, region.currency, silent=True)
+                                            if price_local and price_local > 0:
+                                                all_prices.append({
+                                                    'text': text.replace('\n', ' ').strip(),
+                                                    'price': price_local,
+                                                    'source': f'iap_container: {container_selector}'
+                                                })
+                                                logger.debug(f"找到 IAP 价格: {price_local} ({text[:50]}...)")
+                                except Exception as e:
+                                    continue
                         except Exception as e:
+                            logger.debug(f"处理容器 {container_selector} 时出错: {e}")
                             continue
 
                 except Exception as e:
@@ -225,14 +256,18 @@ class AppStoreScraper:
                     text_content = html.unescape(text_content)
 
                     # 查找价格模式（货币符号 + 数字）
-                    # 支持多种货币格式
+                    # 支持多种货币格式，包括 ARS (阿根廷比索), BRL (巴西雷亚尔) 等
                     currency_patterns = [
-                        r'[\$€£¥₹₺₽₩R\$]\s*[\d.,]+',  # 货币符号在前
-                        r'[\d.,]+\s*[\$€£¥₹₺₽₩R\$]',  # 货币符号在后
+                        r'[\$€£¥₹₺₽₩]\s*[\d.,]+',  # 货币符号在前（美元、欧元等）
+                        r'R\$\s*[\d.,]+',  # 巴西雷亚尔
+                        r'ARS?\s*[\d.,]+',  # 阿根廷比索 (AR$ 或 ARS)
+                        r'US\$\s*[\d.,]+',  # 美元（US$格式）
+                        r'[\d.,]+\s*(?:USD|EUR|GBP|JPY|CNY|ARS|BRL|MXN|COP|CLP)',  # 货币代码在后
+                        r'[\d.,]+\s*[\$€£¥₹₺₽₩]',  # 货币符号在后
                     ]
 
                     for pattern in currency_patterns:
-                        matches = re.findall(pattern, text_content)
+                        matches = re.findall(pattern, text_content, re.IGNORECASE)
                         for match in matches:
                             # 过滤掉无效的价格（太大或太小）
                             price_local = currency_converter.parse_price_string(match, region.currency, silent=True)
