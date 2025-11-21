@@ -85,7 +85,7 @@ class AppStoreScraper:
 
     async def _extract_price_from_page(self, page: Page, region: Region) -> Optional[Dict]:
         """
-        从页面提取价格信息
+        从页面提取价格信息（提取所有价格并返回最高的）
 
         Args:
             page: Playwright Page 对象
@@ -101,10 +101,10 @@ class AppStoreScraper:
             # 等待一下确保内容加载完成
             await asyncio.sleep(2)
 
-            # 尝试多种选择器来查找价格信息
-            price_text = None
+            # 用于存储所有找到的价格
+            all_prices = []
 
-            # 方法 1: 查找包含 "In-App Purchases" 的区域
+            # 方法 1: 查找包含订阅信息的按钮元素
             try:
                 # 查找所有包含价格的元素
                 # App Store 的价格通常在 button 或特定的 div 中
@@ -116,7 +116,9 @@ class AppStoreScraper:
                     '[class*="in-app-purchase"] button',
                     '[class*="iap"] button',
                     'li:has-text("Claude") button',
-                    'button[type="button"]:has-text("month")',
+                    'li:has-text("Pro") button',
+                    'li:has-text("Team") button',
+                    'button[type="button"]',
                 ]
 
                 for selector in price_selectors:
@@ -124,86 +126,101 @@ class AppStoreScraper:
                         elements = await page.query_selector_all(selector)
                         for element in elements:
                             text = await element.inner_text()
-                            # 检查是否包含价格信息
-                            if re.search(r'[\d.,]+', text) and ('month' in text.lower() or self.subscription_type in text.lower()):
-                                price_text = text
-                                logger.debug(f"找到价格文本 (选择器: {selector}): {price_text}")
-                                break
-                        if price_text:
-                            break
+                            # 检查是否包含价格信息和订阅关键词
+                            if re.search(r'[\d.,]+', text) and ('month' in text.lower() or 'year' in text.lower()):
+                                # 过滤掉无效文本（如 PDF, Download 等）
+                                if any(invalid in text.upper() for invalid in ['PDF', 'DOWNLOAD', 'GET', 'OPEN']):
+                                    continue
+
+                                # 解析价格
+                                price_local = currency_converter.parse_price_string(text, region.currency)
+                                if price_local and price_local > 0:
+                                    all_prices.append({
+                                        'text': text,
+                                        'price': price_local,
+                                        'source': f'selector: {selector}'
+                                    })
+                                    logger.debug(f"找到价格: {price_local} ({text})")
                     except Exception as e:
                         continue
 
             except Exception as e:
                 logger.debug(f"方法 1 提取价格失败: {e}")
 
-            # 方法 2: 使用正则表达式在整个页面内容中搜索
-            if not price_text:
+            # 方法 2: 使用正则表达式在整个页面内容中搜索（作为备选）
+            if not all_prices:
                 try:
                     page_content = await page.content()
                     # 根据货币符号和数字模式搜索
                     currency_patterns = [
-                        r'[\$€£¥₹₺₽₩]\s*[\d.,]+',  # 货币符号开头
-                        r'[\d.,]+\s*[\$€£¥₹₺₽₩]',  # 货币符号结尾
-                        r'[A-Z]{3}\s*[\d.,]+',  # 货币代码开头
-                        r'[\d.,]+\s*[A-Z]{3}',  # 货币代码结尾
+                        r'[\$€£¥₹₺₽₩]\s*[\d.,]+(?:\s*/\s*(?:month|year))?',  # 货币符号开头
+                        r'[\d.,]+\s*[\$€£¥₹₺₽₩](?:\s*/\s*(?:month|year))?',  # 货币符号结尾
                     ]
 
                     for pattern in currency_patterns:
-                        matches = re.findall(pattern, page_content)
-                        if matches:
-                            # 取第一个匹配
-                            price_text = matches[0]
-                            logger.debug(f"在页面内容中找到价格: {price_text}")
-                            break
+                        matches = re.findall(pattern, page_content, re.IGNORECASE)
+                        for match in matches:
+                            # 过滤掉无效文本
+                            if any(invalid in match.upper() for invalid in ['PDF', 'DOWNLOAD', 'GET', 'OPEN']):
+                                continue
+
+                            price_local = currency_converter.parse_price_string(match, region.currency)
+                            if price_local and price_local > 0:
+                                all_prices.append({
+                                    'text': match,
+                                    'price': price_local,
+                                    'source': 'page_content'
+                                })
+                                logger.debug(f"在页面内容中找到价格: {price_local} ({match})")
 
                 except Exception as e:
                     logger.debug(f"方法 2 提取价格失败: {e}")
 
-            # 方法 3: 截图保存以便调试
-            if not price_text:
-                try:
-                    screenshot_path = f"data/debug_{region.code}_{int(time.time())}.png"
-                    await page.screenshot(path=screenshot_path, full_page=True)
-                    logger.info(f"未找到价格，已保存截图: {screenshot_path}")
-                except Exception as e:
-                    logger.debug(f"保存截图失败: {e}")
+            # 如果找到价格，选择最高的
+            if all_prices:
+                # 按价格排序，取最高的
+                max_price_info = max(all_prices, key=lambda x: x['price'])
+                price_local = max_price_info['price']
 
-            # 解析价格
-            if price_text:
-                # 提取数字部分
-                price_local = currency_converter.parse_price_string(price_text, region.currency)
+                logger.info(f"找到 {len(all_prices)} 个价格，选择最高: {price_local} {region.currency} (来源: {max_price_info['source']})")
 
-                if price_local:
-                    # 转换为美元
-                    price_usd = currency_converter.convert(
-                        price_local,
+                # 转换为美元
+                price_usd = currency_converter.convert(
+                    price_local,
+                    region.currency,
+                    "USD"
+                )
+
+                if price_usd:
+                    # 获取汇率
+                    exchange_rate = exchange_rate_provider.get_rate(
                         region.currency,
                         "USD"
                     )
 
-                    if price_usd:
-                        # 获取汇率
-                        exchange_rate = exchange_rate_provider.get_rate(
-                            region.currency,
-                            "USD"
-                        )
+                    return {
+                        "app_id": self.app_id,
+                        "app_name": "Claude",
+                        "region_code": region.code,
+                        "region_name": region.name,
+                        "region_name_cn": region.name_cn,
+                        "currency": region.currency,
+                        "price_local": price_local,
+                        "price_usd": price_usd,
+                        "exchange_rate": exchange_rate or 1.0,
+                        "subscription_type": "max",  # 标记为最高价格
+                        "scrape_time": datetime.utcnow(),
+                        "success": 1,
+                        "error_message": None
+                    }
 
-                        return {
-                            "app_id": self.app_id,
-                            "app_name": "Claude",
-                            "region_code": region.code,
-                            "region_name": region.name,
-                            "region_name_cn": region.name_cn,
-                            "currency": region.currency,
-                            "price_local": price_local,
-                            "price_usd": price_usd,
-                            "exchange_rate": exchange_rate or 1.0,
-                            "subscription_type": self.subscription_type,
-                            "scrape_time": datetime.utcnow(),
-                            "success": 1,
-                            "error_message": None
-                        }
+            # 方法 3: 截图保存以便调试
+            try:
+                screenshot_path = f"data/debug_{region.code}_{int(time.time())}.png"
+                await page.screenshot(path=screenshot_path, full_page=True)
+                logger.info(f"未找到价格，已保存截图: {screenshot_path}")
+            except Exception as e:
+                logger.debug(f"保存截图失败: {e}")
 
             logger.warning(f"无法从页面提取价格信息: {region.code}")
             return None
